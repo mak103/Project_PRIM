@@ -1,10 +1,12 @@
 import scipy.sparse
 import numpy as np
 import pandas as pd
+import tensorflow as tf
 from collections import Counter
 from tqdm import tqdm
+import math
 
-class database:
+class Database:
     
     def __init__(self, data_profile, data_skill):
         self.data_profile = data_profile
@@ -241,3 +243,132 @@ class database:
         if show_other_skill:
             print(show[1])
         return
+        
+    def translate(self):
+        
+        """Translate the skills which are written in other languages
+            into English. (The result has already stored in the 
+            "translation_fr.json")
+    
+           Output:
+           ----------
+           translation: `dict`.
+               The dictionary. It can translate skill names which are 
+               appared in the profile database into English.
+               
+        """
+        translation = {}
+        catalog = []
+        for i in tqdm(range(len(self.data_profile))):
+            if 'skills' in (self.data_profile[i].keys()):
+                for skills in self.data_profile[i]['skills']:
+                    if self.data_profile[i]['skills'][0]['title'] == 'Top Skills':
+                        for skill in self.data_profile[i]['skills'][0]['skills']:
+                            title = skill['title'].lower()
+                            if title not in catalog:
+                                catalog.append(title)
+                                result = translate(title, to_language='en').lower()
+                                if result != title:
+                                    translation[title] = result
+        return translation
+    
+class Autoencoder_test:
+    
+    def __init__(self, data):
+        self.data = data
+        self.n_input = data.shape[1]
+        
+    def encode(self, n_dimension=2, learning_rate=0.01, training_epochs=10, batch_size=400):
+        """implement autoencoder to get an encoder with smaller dimension 
+        
+           Parameters
+           ----------
+           n_dimension: `int`.
+               output encoder's dimension, usually equals to 2,
+               in order to be demonstrated on 2-D graph.
+               
+           learning_rate: `float`.
+               learning rate of neural network.
+           
+           training_epochs: `int`.
+               number of times run optimizer over whole data.
+               
+           batch_size: `int`.
+               number of items that be ran every time.
+               
+           Output:
+           ----------
+           self.X_test: `np.array`.
+               shape: (data[0],n_dimension)
+               compressed data, on which we can test clustering algorithms.
+               
+           self.X_cost: `float`. 
+               to see if this encoder loss much information.
+        """
+        X = tf.placeholder(tf.float32,[None, self.n_input])
+        tf.set_random_seed(50)
+        
+        
+        n_hidden_layer1 = int(math.pow(2, int(2*math.log(self.n_input,2)/3+math.log(n_dimension,2)/3)))
+        n_hidden_layer2 = int(math.pow(2, int(math.log(self.n_input,2)/3+2*math.log(n_dimension,2)/3)))
+        n_hidden_layer3 = n_dimension
+        
+        weights = {
+            'encoder_w1':tf.Variable(tf.random_normal([self.n_input, n_hidden_layer1])),
+            'encoder_w2':tf.Variable(tf.random_normal([n_hidden_layer1, n_hidden_layer2])),
+            'encoder_w3':tf.Variable(tf.random_normal([n_hidden_layer2, n_hidden_layer3])),
+        
+            'decoder_w1':tf.Variable(tf.random_normal([n_hidden_layer3, n_hidden_layer2])),
+            'decoder_w2':tf.Variable(tf.random_normal([n_hidden_layer2, n_hidden_layer1])),
+            'decoder_w3':tf.Variable(tf.random_normal([n_hidden_layer1, self.n_input])),
+         }
+        
+        biases = {
+            'encoder_b1':tf.Variable(tf.random_normal([n_hidden_layer1])),
+            'encoder_b2':tf.Variable(tf.random_normal([n_hidden_layer2])),
+            'encoder_b3':tf.Variable(tf.random_normal([n_hidden_layer3])),
+        
+            'decoder_b1':tf.Variable(tf.random_normal([n_hidden_layer2])),
+            'decoder_b2':tf.Variable(tf.random_normal([n_hidden_layer1])),
+            'decoder_b3':tf.Variable(tf.random_normal([self.n_input])),
+         }
+        
+        
+        def encoder(x):
+            layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['encoder_w1']), biases['encoder_b1']))
+            layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['encoder_w2']), biases['encoder_b2']))
+            layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['encoder_w3']), biases['encoder_b3']))
+    
+            return layer_3
+
+        def decoder(x):
+            layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['decoder_w1']), biases['decoder_b1']))
+            layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['decoder_w2']), biases['decoder_b2']))
+            layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['decoder_w3']), biases['decoder_b3']))
+    
+            return layer_3
+        
+        encoder_op = encoder(X)
+        decoder_op = decoder(encoder_op)
+
+        y_pred = decoder_op
+        y_true = X
+
+        cost = tf.reduce_mean(tf.pow(y_pred - y_true, 2))
+        optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
+        
+        
+        with tf.Session() as sess:
+            init = tf.global_variables_initializer()
+            sess.run(init)
+            n_batch = int(self.data.shape[0]/batch_size)
+            for epoch in tqdm(range(training_epochs)):
+                for batch_idx in range(n_batch):
+                    start = batch_idx * batch_size
+                    stop = start + batch_size
+                    _, encoder_result = sess.run([optimizer, encoder_op], feed_dict={X: self.data[start:stop]})
+            self.X_test = sess.run(encoder_op, feed_dict={X:self.data})
+            self.X_cost = sess.run(cost, feed_dict={X:self.data})
+            
+        return self.X_test, self.X_cost
+        
