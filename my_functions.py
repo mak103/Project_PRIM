@@ -4,6 +4,12 @@ import pandas as pd
 import tensorflow as tf
 from collections import Counter
 from tqdm import tqdm
+from mtranslate import translate
+from sklearn.cluster import AgglomerativeClustering
+import dill as pickle
+from gensim.models import word2vec
+import matplotlib.pyplot as plt
+import tensorflow as tf
 import math
 
 class Database:
@@ -371,4 +377,173 @@ class Autoencoder_test:
             self.X_cost = sess.run(cost, feed_dict={X:self.data})
             
         return self.X_test, self.X_cost
+    
+    
+class Skill_culsters:
+    
+    def __init__(self, filename, modelname):
+        """initial the class, form a dataframe from word2vec model
+        
+           Parameters
+           ----------
+           filename: `str`.
+               Path to a skill list.
+               
+           modelname: `str`.
+               Path to a trained word2vec model.
+               In this model, each skill title was a 100-dimension vector
+           
+           self.data: `DataFrame`.
+               A matrix that contains all the vectors of skill titles.
+               
+           self.skill: `list`.
+               A list of skill titles.
+               
+           self.cluster: `list`.
+               Index of items in each cluster.
+        """
+        model = word2vec.Word2Vec.load(modelname) # modelname = '../Utils/word2vec_model_allskills'
+        f = open(filename,"rb") # filename = "../Data/all_top_skills_final_fre.txt"
+        key_list = pickle.load(f)
+        f.close()
+        self.data = pd.DataFrame(columns=[np.zeros([100])]) ## how to determine the dimension here
+        j = 0
+        self.skill = []
+        for i in key_list.keys():
+            try: 
+                self.data.loc[j] = model[i]
+                j+=1
+                self.skill.append(i)
+            except:
+                j = j
+        self.cluster = []
+        
+    def cluseter_agglomerative(self, n_clusters=20, linkage='average', iterate=5):
+        """run agglomerative clustering algorithms on the word2vec model
+            in order to cluster skill titles
+        
+           Parameters
+           ----------
+           n_clusters: `int`, default=20.
+               The number of clusters to find in each iterate.
+               
+           linkage: {“ward”, “complete”, “average”}, default:“average”.
+               The linkage criterion determines which distance to use between sets of observation.
+           
+           iterate: `int`.
+               How many times we run agglomerative clustering algorithms.
+               After each iterate, we take the biggest cluster as the input of the next cluster process.
+        """
+        df = pd.DataFrame(self.data.copy())
+        skill_list = self.skill.copy()
+        for i in tqdm(range(iterate)):
+            clustering_agg = AgglomerativeClustering(n_clusters=n_clusters,linkage=linkage)
+            result_agg = clustering_agg.fit_predict(df)
+            skill_counts = Counter(result_agg)
+            top_three = skill_counts.most_common(3)
+            for i in range(n_clusters):
+                if i != top_three[0][0]:
+                    #list_temp = []
+                    index_temp = []
+                    for j in range(len(result_agg)):
+                        if result_agg[j] == i:
+                            #list_temp.append(skill_list[j])
+                            index_temp.append(self.skill.index(skill_list[j]))
+                    self.cluster.append(index_temp)
+                    #if show_result:
+                        #print(list_temp)
+                        #print("  ")
+            #if show_result:
+                #print("  ")        
+                    
+            df2 = pd.DataFrame(columns=[np.zeros([self.data.shape[1]])])
+            skill_list2 = []
+            j = 0
+            for i in range(len(result_agg)):
+                if result_agg[i] == top_three[0][0]:
+                    df2.loc[j] = df.loc[i]
+                    skill_list2.append(skill_list[i])
+                    j += 1
+            df = df2
+            skill_list = skill_list2
+        return 
+    
+    def print_skill_title(self):
+        """print all the skill titles in different clusters
+        """
+        #index_largest = self.clusters.index(max(self.clusters))
+        for i in range(len(self.cluster)):
+            #if i != index_largest:
+            list_temp = []
+            for j in range(len(self.cluster[i])):
+                 list_temp.append(self.skill[self.cluster[i][j]])
+            print(list_temp)
+            print("  ") 
+        return 
+    
+    def sub_clustering(self, index_cluster=None, linkage='complete', n_max=30):
+        """run agglomerative clustering algorithms on big clusters
+        
+           Parameters
+           ----------
+           index_cluster: `list`, 
+                    Contains the index of big clusters which you want to sub-clustering. 
+                    None means that search all the clusters and sub_clustering all the big clusters.
+               
+           linkage: {“ward”, “complete”, “average”}, default:“complete”.
+               The linkage criterion determines which distance to use between sets of observation.
+               I tried them, and I found that “complete” works best.
+           
+           n_max: `int`.
+               If the number of items is more than n_max in a cluster, then we consider it's a big
+               cluster, and then we will divide it into sub-clusters.
+        """
+        cluster_temp = self.cluster.copy()
+        n_clusters=int(len(self.cluster)/n_max*2+1)
+        if index_cluster is None:
+            for i in range(len(cluster_temp)):
+                if len(cluster_temp[i]) > n_max:
+                    new_data = self.data.loc[cluster_temp[i]]
+                    clustering_agg = AgglomerativeClustering(n_clusters=n_clusters,linkage=linkage)
+                    result_agg = clustering_agg.fit_predict(new_data)
+                    self.cluster.remove(cluster_temp[i])
+                    for k in range(n_clusters):
+                        temp_list = []
+                        for j in range(len(result_agg)):
+                            if result_agg[j] == k:
+                                temp_list.append(cluster_temp[i][j])
+                        self.cluster.append(temp_list)
+        
+        else:
+            for item in index_cluster:
+                new_data = self.data.loc[cluster_temp[item]]
+                clustering_agg = AgglomerativeClustering(n_clusters=n_clusters,linkage=linkage)
+                result_agg = clustering_agg.fit_predict(new_data)
+                self.cluster.remove(cluster_temp[item])
+                for k in range(n_clusters):
+                    temp_list = []
+                    for j in range(len(result_agg)):
+                        if result_agg[j] == k:
+                            temp_list.append(cluster_temp[item][j])
+                    self.cluster.append(temp_list)
+            
+        return
+    
+    
+    
+    def visualize_in_2d(self):
+        """try to visualize the performence of the clustering algorithm by
+            ploting orignal data on a 2-d graph with help of autoencoder
+        """
+        ae = Autoencoder_test(self.data)
+        self.code = ae.encode(n_dimension=2, learning_rate=0.01, training_epochs=10, batch_size=400)
+        for i in range(len(self.cluster)):
+            list_x = []
+            list_y = []
+            for j in self.cluster[i]:
+                list_x.append(self.code[0][j,0])
+                list_y.append(self.code[0][j,1])
+            plt.scatter(list_x,list_y)
+        plt.show()
+        return 
         
