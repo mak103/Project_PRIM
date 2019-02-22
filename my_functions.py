@@ -6,6 +6,7 @@ from collections import Counter
 from tqdm import tqdm
 from mtranslate import translate
 from sklearn.cluster import AgglomerativeClustering
+from sklearn.mixture import GaussianMixture
 import dill as pickle
 from gensim.models import word2vec
 import matplotlib.pyplot as plt
@@ -417,7 +418,25 @@ class Skill_culsters:
             except:
                 j = j
         self.cluster = []
+    
+    
+    def skill_select(self):
+        """choose a skill title in clusters to present this cluster
         
+           Parameters
+           ----------
+           self.present_skill: `list`
+               contains skill titles' index which can present it's cluster 
+        """
+        self.present_skill = []
+        for i in range(len(self.cluster)):
+            center = self.data.loc[self.cluster[i]].values.mean(axis=0)
+            norm_2 = np.linalg.norm(self.data.loc[self.cluster[i]] - center, 2, axis=1).tolist()
+            present_index = self.cluster[i][norm_2.index(min(norm_2))]
+            #self.present_skill.append(self.skill[present_index])
+            self.present_skill.append(present_index)
+        return
+    
     def cluseter_agglomerative(self, n_clusters=20, linkage='average', iterate=5):
         """run agglomerative clustering algorithms on the word2vec model
             in order to cluster skill titles
@@ -466,6 +485,8 @@ class Skill_culsters:
                     j += 1
             df = df2
             skill_list = skill_list2
+        
+        self.skill_select()
         return 
     
     def print_skill_title(self):
@@ -477,11 +498,12 @@ class Skill_culsters:
             list_temp = []
             for j in range(len(self.cluster[i])):
                  list_temp.append(self.skill[self.cluster[i][j]])
-            print(list_temp)
+            #print(self.present_skill[i], list_temp)
+            print(i, self.skill[self.present_skill[i]], list_temp)
             print("  ") 
         return 
     
-    def sub_clustering(self, index_cluster=None, linkage='complete', n_max=30):
+    def sub_clustering(self, n_clusters, index_cluster=None, linkage='complete', n_max=30):
         """run agglomerative clustering algorithms on big clusters
         
            Parameters
@@ -494,12 +516,15 @@ class Skill_culsters:
                The linkage criterion determines which distance to use between sets of observation.
                I tried them, and I found that “complete” works best.
            
+           n_clusters: `int`.
+               The number of sub clusters after clustering.
+           
            n_max: `int`.
                If the number of items is more than n_max in a cluster, then we consider it's a big
                cluster, and then we will divide it into sub-clusters.
         """
         cluster_temp = self.cluster.copy()
-        n_clusters=int(len(self.cluster)/n_max*2+1)
+        #n_clusters=int(len(self.cluster)/n_max*2+1)
         if index_cluster is None:
             for i in range(len(cluster_temp)):
                 if len(cluster_temp[i]) > n_max:
@@ -527,13 +552,117 @@ class Skill_culsters:
                             temp_list.append(cluster_temp[item][j])
                     self.cluster.append(temp_list)
             
+        self.skill_select()
         return
     
     
     
+    
+    def merge_clusters(self, index_cluster=None, member_min=2):
+        """merge small clusters into a bigger one
+        
+           Parameters
+           ----------
+           index_cluster: `list`, 
+                    Contains the index of big clusters which you want to merge. 
+                    None means that search all the small clusters and merge them.
+               
+           member_min: `int`, default:“3”.
+               The number of members which is smaller than member_min will be considered
+               as a small cluster.
+        """
+        if index_cluster is None:
+            merge_list = []
+            cluster_temp = self.cluster.copy()
+            data_temp = pd.DataFrame(columns=[np.zeros([100])])
+            data_index = 0
+            for i in self.present_skill:
+                data_temp.loc[data_index] = self.data.loc[i]
+                data_index += 1
+            for i in range(len(cluster_temp)):
+                if len(cluster_temp[i]) < member_min:
+                    list_temp = data_temp.drop([i]).sub(data_temp.loc[i],axis=1).abs().sum(axis=1).tolist()
+                    if len(merge_list) > 0:
+                        list_index = -1
+                        side = -1
+                        for j in range(len(merge_list)):
+                            if (i in merge_list[j] or list_temp.index(min(list_temp)) in merge_list[j]):
+                                if (i in merge_list[j] and list_temp.index(min(list_temp)) in merge_list[j]):
+                                    break
+                                elif i in merge_list[j]:
+                                    list_index = j
+                                    side = 0
+                                elif list_temp.index(min(list_temp)) in merge_list[j]:
+                                    list_index = j
+                                    side = 1
+                        if list_index >= 0:
+                            if side == 0:
+                                merge_list[list_index].append(list_temp.index(min(list_temp)))
+                            if side == 1:
+                                merge_list[list_index].append(i)
+                        else:
+                            merge_list.append([i,list_temp.index(min(list_temp))])
+                    else:
+                        merge_list.append([i,list_temp.index(min(list_temp))])
+
+            #print(merge_list)
+            self.merge_clusters(index_cluster=merge_list)
+            
+        else:
+            cluster_temp = self.cluster.copy()
+            for i in index_cluster:
+                temp_list = [] 
+                for j in i:
+                    try:
+                        self.cluster.remove(cluster_temp[j])
+                    except:
+                        j=j
+                    for k in cluster_temp[j]:
+                        temp_list.append(k)
+                self.cluster.append(temp_list)
+            #for i in index_cluster:
+                #for j in i:
+                    #self.cluster.remove(cluster_temp[j])
+               
+        self.skill_select()
+        return
+            
+            
+    def fit(self):
+        """
+        
+        """
+        self.cluseter_agglomerative(n_clusters=20, linkage='average', iterate=5)
+        self.sub_clustering(n_clusters=3, index_cluster=[79], linkage='complete')
+        self.merge_clusters([[0,9,53],[1,83],[46,35,67],[88,23],[6,68]])
+        self.merge_clusters([[6,33,52],[17,14]])
+        self.sub_clustering(n_clusters=2, index_cluster=[0], linkage='average')
+        self.sub_clustering(n_clusters=3, index_cluster=[2], linkage='average')
+        self.sub_clustering(n_clusters=3, index_cluster=[85], linkage='average')
+        self.sub_clustering(n_clusters=2, index_cluster=[14], linkage='complete')
+        self.sub_clustering(n_clusters=2, index_cluster=[16], linkage='average')
+        self.sub_clustering(n_clusters=3, index_cluster=[22], linkage='average')
+        self.sub_clustering(n_clusters=2, index_cluster=[24], linkage='complete')
+        self.sub_clustering(n_clusters=2, index_cluster=[26], linkage='complete')
+        self.sub_clustering(n_clusters=3, index_cluster=[28], linkage='ward')
+        self.merge_clusters([[6,98,99]])
+        self.merge_clusters([[35,80]])
+        self.sub_clustering(n_clusters=4, index_cluster=[35], linkage='complete')
+        self.merge_clusters([[76,98]])
+        self.sub_clustering(n_clusters=3, index_cluster=[35], linkage='complete')
+        self.merge_clusters([[39,42]])
+        self.sub_clustering(n_clusters=3, index_cluster=[47], linkage='complete')
+        self.sub_clustering(n_clusters=3, index_cluster=[51], linkage='average')
+        self.merge_clusters([[70,101]])
+        self.sub_clustering(n_clusters=3, index_cluster=[51], linkage='complete')
+        self.sub_clustering(n_clusters=3, index_cluster=[61], linkage='ward')
+        self.merge_clusters()
+        return
+    
+    
     def visualize_in_2d(self):
         """try to visualize the performence of the clustering algorithm by
-            ploting orignal data on a 2-d graph with help of autoencoder
+            ploting orignal data on a 2-d graph with help of Autoencoder
         """
         ae = Autoencoder_test(self.data)
         self.code = ae.encode(n_dimension=2, learning_rate=0.01, training_epochs=10, batch_size=400)
