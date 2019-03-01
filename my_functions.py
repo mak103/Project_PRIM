@@ -12,14 +12,15 @@ from gensim.models import word2vec
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import math
+import heapq
 
-class Database:
+class Profile_matching:
     
     def __init__(self, data_profile, data_skill):
         self.data_profile = data_profile
         self.data_skill = data_skill
         
-    def skill_list(self):
+    def data_skill_list(self):
         """Put all the skill names in the skill database in a list
     
             Returns
@@ -39,44 +40,42 @@ class Database:
             appears in the skill database, then put this skill
             name in the list
     
-            Returns
             -------
-            top_skill_list:`list`.
+            self.top_skill_list:`list`.
                 Contains the names of each skill which appears 
                 both in the skill and in the 'Top Skills' part of 
                 the profile database      
         """
-        data_skill_list = self.skill_list()
-        top_skill_list = []
+        data_skill_list = self.data_skill_list()
+        self.skill_list = []
         for i in range(len(self.data_profile)):
             if 'skills' in self.data_profile[i].keys():
                 if self.data_profile[i]['skills'][0]['title'] == 'Top Skills':
                     for skills in self.data_profile[i]['skills'][0]['skills']:
                         if skills['title'] in data_skill_list:
-                            top_skill_list.append(skills['title'])
-        return top_skill_list
+                            self.skill_list.append(skills['title'])
+        return
     
     def all_skill_list(self):
         """Search all skills in each profile, if it also appears 
             in the skill database, then put this skill name in 
             the list
     
-            Returns
             -------
-            top_skill_list:`list`.
+            self.all_skill_list:`list`.
                 Contains the names of each skill which appears 
                 both in the skill and in profile database. It 
                 includes repetitions.
         """
-        data_skill_list = self.skill_list()
-        all_skill_list = []
+        data_skill_list = self.data_skill_list()
+        self.skill_list = []
         for i in range(len(self.data_profile)):
             if 'skills' in self.data_profile[i].keys():
                 for j in range(len(self.data_profile[i]['skills'])):
                     for skills in self.data_profile[i]['skills'][j]['skills']:
                         if skills['title'] in data_skill_list:
-                            all_skill_list.append(skills['title'])
-        return all_skill_list
+                            self.skill_list.append(skills['title'])
+        return 
     
     def count_words(self,top_only=True):
         """Count the frequent of the appearence for each skill in 
@@ -89,7 +88,6 @@ class Database:
                 Decicde the input is top_skill_list or all_skill 
                 _list
             
-            Returns
             -------
             feature:`list`.
                 Contains the names of unique skill names in the
@@ -101,20 +99,21 @@ class Database:
                 it has. Here I use the log function
         """
         if top_only:
-            skill_list = self.top_skill_list()
+            self.top_skill_list()
         else:
-            skill_list = self.all_skill_list()
-        word_counts = Counter(skill_list)
+            self.all_skill_list()
+        word_counts = Counter(self.skill_list)
         top_n = word_counts.most_common(len(word_counts))
-        feature = []
+        self.feature = []
         proportion = []
         for i in top_n:
-            feature.append(i[0])
+            self.feature.append(i[0])
             proportion.append(i[1])
-        coff = 1./(np.log(proportion)+1)
-        return feature, coff
+        self.coff = 1./(np.log(proportion)+1)
+        return 
 
-    def build_top_skill_frame(self, binary=False ):
+    #def build_top_skill_frame(self, binary=True):
+    def fit(self, binary=True):
         """Bulid a DataFrame by the top skills in each profile.
     
             Parameters
@@ -127,44 +126,44 @@ class Database:
               
             Inputs
             ----------
-            feature:`list`.
+            self.feature:`list`.
                 Contains the names of unique skill names.
                 
-            coff:`float64`,shape (len(feature),).
+            self.coff:`float64`,shape (len(self.feature),).
                 Penality coefficient for each skill, the more frequent 
                 a skill appears, the smaller cofficient it has.
             
-            Returns
             -------
-            df:`DataFrame`,shape(len(data_profile), len(feature)).
+            self.df:`DataFrame`,shape(len(data_profile), len(self.feature)).
                 Each row corresponds to a profile. The top skill
                 information are stored by the binary number or
                 the endoresementCount values.
                 
         """
-        feature, coff = self.count_words(top_only=True)
-        array = scipy.sparse.lil_matrix((len(self.data_profile), len(feature)))
-        for i in tqdm(range(len(self.data_profile))):
-            rang = np.zeros(len(feature))
+        self.count_words(top_only=True)
+        array = scipy.sparse.lil_matrix((len(self.data_profile), len(self.feature)))
+        for i in range(len(self.data_profile)):
+            rang = np.zeros(len(self.feature))
             if 'skills' in self.data_profile[i].keys():
                 for skills in self.data_profile[i]['skills']:
                     if self.data_profile[i]['skills'][0]['title'] == 'Top Skills':
                         for skill in self.data_profile[i]['skills'][0]['skills']:
-                            if skill['title'] in feature:
+                            if skill['title'] in self.feature:
                                 if 'endoresementCount' in skill.keys():
                                     if '+' in skill['endoresementCount']:
                                         count = 100
                                     else:
                                         count = int(skill['endoresementCount'])
-                                    index = feature.index(skill['title'])
-                                    array[i,index] = count * coff[index]
-        df = pd.DataFrame(data=array.A, columns=feature)
+                                    index = self.feature.index(skill['title'])
+                                    array[i,index] = count * self.coff[index]
+        self.df = pd.DataFrame(data=array.A, columns=self.feature)
         if binary:
-            df = (df != 0).astype('int')
-        return df
+            self.df = (self.df != 0).astype('int')
+        return
     
-    def build_all_skill_frame(self, binary=False, top_effect=10):
+    def build_all_skill_frame(self, binary=True, top_effect=10):
         """Bulid a DataFrame by all the skills in each profile.
+          Would take long time, not recommended.
     
            Parameters
            ----------
@@ -180,26 +179,26 @@ class Database:
             
            Inputs
            ---------- 
-           feature:`list`.
+           self.feature:`list`.
                 Contains the names of unique skill names.
                 
-           coff:`float64`,shape (len(feature),).
+           self.coff:`float64`,shape (len(self.feature),).
                 Penality coefficient for each skill, the more frequent 
                 a skill appears, the smaller cofficient it has.
             
             Returns
             -------
-            df:`DataFrame`,shape(len(data_profile), len(feature)).
+            df:`DataFrame`,shape(len(data_profile), len(self.feature)).
                 Each row corresponds to a profile. The skill information 
                 are stored by the binary number or the endoresementCount 
                 values.
                 
         """
-        feature, coff = self.count_words(top_only=False)
-        array = scipy.sparse.lil_matrix((len(self.data_profile), len(feature)))
+        self.count_words(top_only=False)
+        array = scipy.sparse.lil_matrix((len(self.data_profile), len(self.feature)))
         effect = 1
         for i in tqdm(range(len(self.data_profile))):
-            rang = np.zeros(len(feature))
+            rang = np.zeros(len(self.feature))
             if 'skills' in self.data_profile[i].keys():
                 for skills in self.data_profile[i]['skills']:
                     for j in range(len(self.data_profile[i]['skills'])):
@@ -208,18 +207,18 @@ class Database:
                         else:
                             effect = 1
                         for skill in self.data_profile[i]['skills'][j]['skills']:
-                            if skill['title'] in feature:
+                            if skill['title'] in self.feature:
                                 if 'endoresementCount' in skill.keys():
                                     if '+' in skill['endoresementCount']:
                                         count = 100
                                     else:
                                         count = int(skill['endoresementCount'])
-                                    index = feature.index(skill['title'])
-                                    array[i,index] = count * coff[index] * effect
-        df = pd.DataFrame(data=array.A, columns=feature)
+                                    index = self.feature.index(skill['title'])
+                                    array[i,index] = count * self.coff[index] * effect
+        self.df = pd.DataFrame(data=array.A, columns=self.feature)
         if binary:
-            df = (df != 0).astype('int')
-        return df
+            self.df = (self.df != 0).astype('int')
+        return self.df
 
     def show_skill(self, index, show_other_skill=False):
         """Print a profile's skills.
@@ -246,13 +245,14 @@ class Database:
             else:
                 for skill in skills['skills']:
                     show[1].append(skill['title'])
+        print("index:",index)
         print(show[0])
         if show_other_skill:
             print(show[1])
+        print("  ")
         return
         
     def translate(self):
-        
         """Translate the skills which are written in other languages
             into English. (The result has already stored in the 
             "translation_fr.json")
@@ -279,110 +279,42 @@ class Database:
                                     translation[title] = result
         return translation
     
-class Autoencoder_test:
+    def match(self, profile_index, nb_profile=3, show_other_skill=True):
+        """Matching similar profiles of a given profile (it's index).
     
-    def __init__(self, data):
-        self.data = data
-        self.n_input = data.shape[1]
-        
-    def encode(self, n_dimension=2, learning_rate=0.01, training_epochs=10, batch_size=400):
-        """implement autoencoder to get an encoder with smaller dimension 
-        
-           Parameters
+           Input:
            ----------
-           n_dimension: `int`.
-               output encoder's dimension, usually equals to 2,
-               in order to be demonstrated on 2-D graph.
+           profile_index: `int`.
+               The index of a profile, which we want ot match other profiles with.
                
-           learning_rate: `float`.
-               learning rate of neural network.
+           nb_profile: `int`.
+               The number of similar profiles we want to match.
            
-           training_epochs: `int`.
-               number of times run optimizer over whole data.
-               
-           batch_size: `int`.
-               number of items that be ran every time.
-               
-           Output:
-           ----------
-           self.X_test: `np.array`.
-               shape: (data[0],n_dimension)
-               compressed data, on which we can test clustering algorithms.
-               
-           self.X_cost: `float`. 
-               to see if this encoder loss much information.
+           show_other_skill: `bool`.
+               Decide if show all the skills in profiles or just their top skills.
         """
-        X = tf.placeholder(tf.float32,[None, self.n_input])
-        tf.set_random_seed(50)
-        
-        
-        n_hidden_layer1 = int(math.pow(2, int(2*math.log(self.n_input,2)/3+math.log(n_dimension,2)/3)))
-        n_hidden_layer2 = int(math.pow(2, int(math.log(self.n_input,2)/3+2*math.log(n_dimension,2)/3)))
-        n_hidden_layer3 = n_dimension
-        
-        weights = {
-            'encoder_w1':tf.Variable(tf.random_normal([self.n_input, n_hidden_layer1])),
-            'encoder_w2':tf.Variable(tf.random_normal([n_hidden_layer1, n_hidden_layer2])),
-            'encoder_w3':tf.Variable(tf.random_normal([n_hidden_layer2, n_hidden_layer3])),
-        
-            'decoder_w1':tf.Variable(tf.random_normal([n_hidden_layer3, n_hidden_layer2])),
-            'decoder_w2':tf.Variable(tf.random_normal([n_hidden_layer2, n_hidden_layer1])),
-            'decoder_w3':tf.Variable(tf.random_normal([n_hidden_layer1, self.n_input])),
-         }
-        
-        biases = {
-            'encoder_b1':tf.Variable(tf.random_normal([n_hidden_layer1])),
-            'encoder_b2':tf.Variable(tf.random_normal([n_hidden_layer2])),
-            'encoder_b3':tf.Variable(tf.random_normal([n_hidden_layer3])),
-        
-            'decoder_b1':tf.Variable(tf.random_normal([n_hidden_layer2])),
-            'decoder_b2':tf.Variable(tf.random_normal([n_hidden_layer1])),
-            'decoder_b3':tf.Variable(tf.random_normal([self.n_input])),
-         }
-        
-        
-        def encoder(x):
-            layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['encoder_w1']), biases['encoder_b1']))
-            layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['encoder_w2']), biases['encoder_b2']))
-            layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['encoder_w3']), biases['encoder_b3']))
+        sample = self.df.loc[profile_index].values
+        if sum(sample) == 0:
+            print('This profile doesn\'t have skill.')
+            return 
+        score = self.df.values.dot(sample)
+        score = list(score)
+        self.max_index = heapq.nlargest(nb_profile+1, range(len(score)), score.__getitem__)
+        print("input profile:")
+        self.show_skill(profile_index, show_other_skill=show_other_skill)
+        print("matched profiles:")
+        for i in range(len(self.max_index)):
+            if i == nb_profile:
+                break
+            if self.max_index[i] != profile_index:
+                self.show_skill(self.max_index[i], show_other_skill=show_other_skill)
+        return
     
-            return layer_3
-
-        def decoder(x):
-            layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['decoder_w1']), biases['decoder_b1']))
-            layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['decoder_w2']), biases['decoder_b2']))
-            layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['decoder_w3']), biases['decoder_b3']))
+   
     
-            return layer_3
-        
-        encoder_op = encoder(X)
-        decoder_op = decoder(encoder_op)
-
-        y_pred = decoder_op
-        y_true = X
-
-        cost = tf.reduce_mean(tf.pow(y_pred - y_true, 2))
-        optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
-        
-        
-        with tf.Session() as sess:
-            init = tf.global_variables_initializer()
-            sess.run(init)
-            n_batch = int(self.data.shape[0]/batch_size)
-            for epoch in tqdm(range(training_epochs)):
-                for batch_idx in range(n_batch):
-                    start = batch_idx * batch_size
-                    stop = start + batch_size
-                    _, encoder_result = sess.run([optimizer, encoder_op], feed_dict={X: self.data[start:stop]})
-            self.X_test = sess.run(encoder_op, feed_dict={X:self.data})
-            self.X_cost = sess.run(cost, feed_dict={X:self.data})
-            
-        return self.X_test, self.X_cost
+class Skill_culstering:
     
-    
-class Skill_culsters:
-    
-    def __init__(self, filename, modelname):
+    def __init__(self, filename, modelname, dim_model=100):
         """initial the class, form a dataframe from word2vec model
         
            Parameters
@@ -392,7 +324,10 @@ class Skill_culsters:
                
            modelname: `str`.
                Path to a trained word2vec model.
-               In this model, each skill title was a 100-dimension vector
+               In this model, each skill title was a "dim_model" dimension vector
+               
+           dim_model: `int`.
+               Dimension of the vector of the Word2vec model, default 100.
            
            self.data: `DataFrame`.
                A matrix that contains all the vectors of skill titles.
@@ -403,11 +338,12 @@ class Skill_culsters:
            self.cluster: `list`.
                Index of items in each cluster.
         """
+        self.dim = dim_model
         model = word2vec.Word2Vec.load(modelname) # modelname = '../Utils/word2vec_model_allskills'
         f = open(filename,"rb") # filename = "../Data/all_top_skills_final_fre.txt"
         key_list = pickle.load(f)
         f.close()
-        self.data = pd.DataFrame(columns=[np.zeros([100])]) ## how to determine the dimension here
+        self.data = pd.DataFrame(columns=[np.zeros([self.dim])]) ## how to determine the dimension here
         j = 0
         self.skill = []
         for i in key_list.keys():
@@ -555,8 +491,33 @@ class Skill_culsters:
         self.skill_select()
         return
     
-    
-    
+    def sub_clustering_test(self, n_clusters, index_cluster, linkage='aveage'):
+        """run agglomerative clustering algorithms a given cluster, to see if the result is satisficing.
+            It doesn't change the self.cluster's structure.
+        
+           Parameters
+           ----------
+           index_cluster: `int`, 
+                    The index of big clusters which you want to sub-clustering. 
+               
+           linkage: {“ward”, “complete”, “average”}, default:“aveage”.
+               The linkage criterion determines which distance to use between sets of observation.
+           
+           n_clusters: `int`.
+               The number of sub clusters after clustering.
+
+        """
+        new_data = self.data.loc[self.cluster[index_cluster]]
+        clustering_agg = AgglomerativeClustering(n_clusters=n_clusters,linkage=linkage)
+        result_agg = clustering_agg.fit_predict(new_data)
+        for k in range(n_clusters):
+            temp_list = []
+            for j in range(len(result_agg)):
+                if result_agg[j] == k:
+                    temp_list.append(self.skill[self.cluster[index_cluster][j]])
+            print(temp_list)
+            print("  ")
+        return
     
     def merge_clusters(self, index_cluster=None, member_min=2):
         """merge small clusters into a bigger one
@@ -574,7 +535,7 @@ class Skill_culsters:
         if index_cluster is None:
             merge_list = []
             cluster_temp = self.cluster.copy()
-            data_temp = pd.DataFrame(columns=[np.zeros([100])])
+            data_temp = pd.DataFrame(columns=[np.zeros([self.dim])])
             data_index = 0
             for i in self.present_skill:
                 data_temp.loc[data_index] = self.data.loc[i]
@@ -630,7 +591,7 @@ class Skill_culsters:
             
     def fit(self):
         """
-        
+        give a manually selected clustering result
         """
         self.cluseter_agglomerative(n_clusters=20, linkage='average', iterate=5)
         self.sub_clustering(n_clusters=3, index_cluster=[79], linkage='complete')
@@ -675,4 +636,122 @@ class Skill_culsters:
             plt.scatter(list_x,list_y)
         plt.show()
         return 
+    def partial_visualize_in_2d(self, cluster_index=[5,12,35,44,64,75,81]):
+        """visualize the performence of certain clustering resut, need to run self.visualize_in_2d() first.
         
+           Input
+           ----------
+           cluster_index: `list`, 
+                    index of clusters that need to be scattered.
+        """
+        for i in cluster_index:
+            list_x = []
+            list_y = []
+            for j in self.cluster[i]:
+                list_x.append(self.code[0][j,0])
+                list_y.append(self.code[0][j,1])
+            plt.scatter(list_x,list_y, label=self.skill[self.present_skill[i]])
+        plt.legend()
+        plt.show()
+        return
+    
+class Autoencoder_test:
+    
+    def __init__(self, data):
+        self.data = data
+        self.n_input = data.shape[1]
+        
+    def encode(self, n_dimension=2, learning_rate=0.01, training_epochs=10, batch_size=400):
+        """implement autoencoder to get an encoder with smaller dimension 
+        
+           Parameters
+           ----------
+           n_dimension: `int`.
+               output encoder's dimension, usually equals to 2,
+               in order to be demonstrated on 2-D graph.
+               
+           learning_rate: `float`.
+               learning rate of neural network.
+           
+           training_epochs: `int`.
+               number of times run optimizer over whole data.
+               
+           batch_size: `int`.
+               number of items that be ran every time.
+               
+           Output:
+           ----------
+           self.X_test: `np.array`.
+               shape: (data[0],n_dimension)
+               compressed data, on which we can test clustering algorithms.
+               
+           self.X_cost: `float`. 
+               to see if this encoder loss much information.
+        """
+        X = tf.placeholder(tf.float32,[None, self.n_input])
+        tf.set_random_seed(50)
+        
+        
+        n_hidden_layer1 = int(math.pow(2, int(2*math.log(self.n_input,2)/3+math.log(n_dimension,2)/3)))
+        n_hidden_layer2 = int(math.pow(2, int(math.log(self.n_input,2)/3+2*math.log(n_dimension,2)/3)))
+        n_hidden_layer3 = n_dimension
+        
+        weights = {
+            'encoder_w1':tf.Variable(tf.random_normal([self.n_input, n_hidden_layer1])),
+            'encoder_w2':tf.Variable(tf.random_normal([n_hidden_layer1, n_hidden_layer2])),
+            'encoder_w3':tf.Variable(tf.random_normal([n_hidden_layer2, n_hidden_layer3])),
+        
+            'decoder_w1':tf.Variable(tf.random_normal([n_hidden_layer3, n_hidden_layer2])),
+            'decoder_w2':tf.Variable(tf.random_normal([n_hidden_layer2, n_hidden_layer1])),
+            'decoder_w3':tf.Variable(tf.random_normal([n_hidden_layer1, self.n_input])),
+         }
+        
+        biases = {
+            'encoder_b1':tf.Variable(tf.random_normal([n_hidden_layer1])),
+            'encoder_b2':tf.Variable(tf.random_normal([n_hidden_layer2])),
+            'encoder_b3':tf.Variable(tf.random_normal([n_hidden_layer3])),
+        
+            'decoder_b1':tf.Variable(tf.random_normal([n_hidden_layer2])),
+            'decoder_b2':tf.Variable(tf.random_normal([n_hidden_layer1])),
+            'decoder_b3':tf.Variable(tf.random_normal([self.n_input])),
+         }
+        
+        
+        def encoder(x):
+            layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['encoder_w1']), biases['encoder_b1']))
+            layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['encoder_w2']), biases['encoder_b2']))
+            layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['encoder_w3']), biases['encoder_b3']))
+    
+            return layer_3
+
+        def decoder(x):
+            layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['decoder_w1']), biases['decoder_b1']))
+            layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['decoder_w2']), biases['decoder_b2']))
+            layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['decoder_w3']), biases['decoder_b3']))
+    
+            return layer_3
+        
+        encoder_op = encoder(X)
+        decoder_op = decoder(encoder_op)
+
+        y_pred = decoder_op
+        y_true = X
+
+        cost = tf.reduce_mean(tf.pow(y_pred - y_true, 2))
+        optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
+        
+        
+        with tf.Session() as sess:
+            init = tf.global_variables_initializer()
+            sess.run(init)
+            n_batch = int(self.data.shape[0]/batch_size)
+            for epoch in tqdm(range(training_epochs)):
+                for batch_idx in range(n_batch):
+                    start = batch_idx * batch_size
+                    stop = start + batch_size
+                    _, encoder_result = sess.run([optimizer, encoder_op], feed_dict={X: self.data[start:stop]})
+            self.X_test = sess.run(encoder_op, feed_dict={X:self.data})
+            self.X_cost = sess.run(cost, feed_dict={X:self.data})
+            
+        return self.X_test, self.X_cost
+ 
